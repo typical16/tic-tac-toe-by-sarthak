@@ -1,0 +1,931 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title> Tic-Tac-Toe Game</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+  <div class="game-container">
+    <h1> Tic-Tac-Toe</h1>
+
+    <div class="mode-selection" id="modeSelection">
+      <h2>Select Game Mode</h2>
+      <button class="mode-button" id="onlineButton">Play Online</button>
+      <button class="mode-button" id="offlineButton">Play Offline (2 Players)</button>
+      <button class="guide-button" id="guideButton">How to Play</button>
+    </div>
+
+    <div class="input-container" id="input-container" style="display: none;">
+      <input type="text" id="playerName" placeholder="Enter Your Name" />
+      <button class="start-button" id="startButton">Find Opponent</button>
+    </div>
+
+    <div class="offline-container" id="offlineContainer" style="display: none;">
+      <div class="offline-input-container" id="offlineInputContainer">
+        <div class="player-input">
+          <input type="text" id="player1Name" placeholder="Player 1 Name" />
+          <span class="symbol-label">(X)</span>
+        </div>
+        <div class="player-input">
+          <input type="text" id="player2Name" placeholder="Player 2 Name" />
+          <span class="symbol-label">(O)</span>
+        </div>
+        <button class="start-button" id="offlineStartButton">Start Game</button>
+      </div>
+
+      <div class="offline-game" id="offlineGame" style="display: none;">
+        <div class="player-info">
+          <div class="player-badge current" id="offlinePlayer1Badge">
+            Player 1 <span class="player-symbol">(X)</span>
+          </div>
+          <div class="player-badge" id="offlinePlayer2Badge">
+            Player 2 <span class="player-symbol">(O)</span>
+          </div>
+        </div>
+        
+        <div class="game-stats offline-stats" id="offlineStats">
+          <div class="stat-item">
+            <div>X Wins</div>
+            <div class="stat-value" id="xWinCount">0</div>
+          </div>
+          <div class="stat-item">
+            <div>O Wins</div>
+            <div class="stat-value" id="oWinCount">0</div>
+          </div>
+          <div class="stat-item">
+            <div>Games</div>
+            <div class="stat-value" id="offlineGameCount">0</div>
+          </div>
+        </div>
+
+        <div class="timer" id="offlineTimer" style="display: none;">
+          Time remaining: <span id="offlineCountdown">10</span>s
+        </div>
+        <div class="grid" id="offlineGrid"></div>
+        <p class="status" id="offlineStatus"></p>
+        <button class="reset-button" id="offlineResetButton" style="display: none;">Play Again</button>
+      </div>
+    </div>
+
+    <div class="game-stats" id="gameStats">
+      <div class="stat-item">
+        <div>Wins</div>
+        <div class="stat-value" id="winCount">0</div>
+      </div>
+      <div class="stat-item">
+        <div>Games</div>
+        <div class="stat-value" id="gameCount">0</div>
+      </div>
+      <div class="stat-item">
+        <div>Win Rate</div>
+        <div class="stat-value" id="winRate">0%</div>
+      </div>
+    </div>
+
+    <div class="player-info" id="playerInfo" style="display: none;">
+      <div class="player-badge" id="playerBadge">
+        You <span class="player-symbol"></span>
+      </div>
+      <div class="player-badge" id="opponentBadge">
+        Opponent <span class="player-symbol"></span>
+      </div>
+    </div>
+
+    <div class="timer" id="timer" style="display: none;">
+      Time remaining: <span id="countdown">10</span>s
+    </div>
+
+    <div class="grid" id="grid"></div>
+    <p class="status" id="status" style="display: none;">
+      <span class="status-text">Waiting for opponent</span>
+      <span class="waiting-dots">
+        <span></span>
+        <span></span>
+        <span></span>
+      </span>
+    </p>
+    <button class="reset-button" id="resetButton" style="display: none;">Play Again</button>
+  </div>
+
+  <div class="notification" id="notification">
+    <div class="notification-icon">!</div>
+    <div class="notification-message"></div>
+  </div>
+
+  <div class="move-indicator" id="moveIndicator"></div>
+
+  <div class="footer-text">
+    Powered by <span>Sarthak</span>
+  </div>
+
+  <div class="modal-overlay" id="disconnectModal">
+    <div class="modal">
+      <div class="disconnect-icon"></div>
+      <h2 class="modal-title">Connection Lost</h2>
+      <p class="modal-message">Your opponent has disconnected from the game.</p>
+      <div class="modal-buttons">
+        <button class="modal-button primary-button" onclick="handleDisconnectPlayAgain()">Find New Opponent</button>
+        <button class="modal-button secondary-button" onclick="handleDisconnectGoHome()">Go to Home</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="waitingModal">
+    <div class="modal waiting-modal">
+      <div class="searching-animation">
+        <div class="searching-circle"></div>
+        <div class="searching-circle"></div>
+        <div class="searching-circle"></div>
+      </div>
+      <h2 class="modal-title">Finding Opponent</h2>
+      <p class="modal-message">Please wait while we match you with another player...</p>
+      <button class="modal-button cancel-button" id="cancelMatchmaking">Cancel</button>
+    </div>
+  </div>
+
+  <script>
+    const socket = io();
+    let playerSymbol = '';
+    let gameId = null;
+    let isMyTurn = false;
+    let countdownInterval = null;
+    let gameStats = {
+      wins: 0,
+      games: 0
+    };
+
+    let isOfflineMode = false;
+    let offlineCurrentPlayer = 'X';
+    let offlineBoard = Array(9).fill('');
+    let offlineGameActive = false;
+    let offlineCountdownInterval = null;
+    let offlineStats = {
+      xWins: 0,
+      oWins: 0,
+      games: 0
+    };
+
+    let player1Name = 'Player 1';
+    let player2Name = 'Player 2';
+
+    // DOM Elements
+    const gridElement = document.getElementById('grid');
+    const statusElement = document.getElementById('status');
+    const resetButton = document.getElementById('resetButton');
+    const inputContainer = document.getElementById('input-container');
+    const startButton = document.getElementById('startButton');
+    const playerNameInput = document.getElementById('playerName');
+    const timerElement = document.getElementById('timer');
+    const countdownElement = document.getElementById('countdown');
+    const gameStatsElement = document.getElementById('gameStats');
+    const playerInfo = document.getElementById('playerInfo');
+    const playerBadge = document.getElementById('playerBadge');
+    const opponentBadge = document.getElementById('opponentBadge');
+    const notification = document.getElementById('notification');
+    const moveIndicator = document.getElementById('moveIndicator');
+
+    const modeSelection = document.getElementById('modeSelection');
+    const onlineButton = document.getElementById('onlineButton');
+    const offlineButton = document.getElementById('offlineButton');
+    const offlineContainer = document.getElementById('offlineContainer');
+    const offlineGrid = document.getElementById('offlineGrid');
+    const offlineStatus = document.getElementById('offlineStatus');
+    const offlineResetButton = document.getElementById('offlineResetButton');
+    const offlineTimer = document.getElementById('offlineTimer');
+    const offlineCountdownElement = document.getElementById('offlineCountdown');
+    const offlinePlayer1Badge = document.getElementById('offlinePlayer1Badge');
+    const offlinePlayer2Badge = document.getElementById('offlinePlayer2Badge');
+
+    const offlineInputContainer = document.getElementById('offlineInputContainer');
+    const offlineGame = document.getElementById('offlineGame');
+    const player1NameInput = document.getElementById('player1Name');
+    const player2NameInput = document.getElementById('player2Name');
+    const offlineStartButton = document.getElementById('offlineStartButton');
+
+    // Sound effects
+    const moveSound = new Audio('button-lips-29331 (mp3cut.net).mp3');
+    const winSound = new Audio('brass-fanfare-with-timpani-and-winchimes-reverberated-146260.mp3');
+    const drawSound = new Audio('game-over-classic-206486.mp3');
+    const timeoutSound = new Audio('game-over-classic-206486.mp3');
+    const disconnectSound = new Audio('game-over-classic-206486.mp3');
+
+    // Initialize guide button visibility
+    const guideButton = document.getElementById('guideButton');
+    
+    // Clear any existing state on page load
+    localStorage.removeItem('guideButtonHidden');
+    guideButton.classList.remove('fade-out');
+
+    function showNotification(message, duration = 3000) {
+      const notificationMessage = notification.querySelector('.notification-message');
+      notificationMessage.textContent = message;
+      notification.classList.add('show');
+      setTimeout(() => {
+        notification.classList.remove('show');
+      }, duration);
+    }
+
+    function createConfetti() {
+      for (let i = 0; i < 50; i++) {
+        const confetti = document.createElement('div');
+        confetti.className = 'confetti';
+        confetti.style.left = Math.random() * 100 + '%';
+        confetti.style.animationDelay = Math.random() * 3 + 's';
+        confetti.style.backgroundColor = i % 2 === 0 ? '#4CAF50' : '#45a049';
+        document.querySelector('.game-container').appendChild(confetti);
+        setTimeout(() => confetti.remove(), 3000);
+      }
+    }
+
+    function updateStats(hasWon) {
+      gameStats.games++;
+      if (hasWon) gameStats.wins++;
+      
+      document.getElementById('winCount').textContent = gameStats.wins;
+      document.getElementById('gameCount').textContent = gameStats.games;
+      document.getElementById('winRate').textContent = 
+        Math.round((gameStats.wins / gameStats.games) * 100) + '%';
+      
+      gameStatsElement.classList.add('visible');
+    }
+
+    function showMoveIndicator(x, y) {
+      moveIndicator.style.left = x + 'px';
+      moveIndicator.style.top = y + 'px';
+      moveIndicator.classList.add('animate');
+      setTimeout(() => {
+        moveIndicator.classList.remove('animate');
+      }, 500);
+    }
+
+    function startTimer() {
+      let timeLeft = 10;
+      timerElement.style.display = 'block';
+      timerElement.classList.remove('hidden');
+      countdownElement.textContent = timeLeft;
+
+      if (countdownInterval) {
+        clearInterval(countdownInterval);
+      }
+
+      // Reset timer animations
+      timerElement.classList.remove('active', 'urgent', 'opponent-turn');
+      // Force DOM reflow to restart animations
+      void timerElement.offsetWidth;
+      // Add active class to start the progress animation
+      timerElement.classList.add('active');
+
+      countdownInterval = setInterval(() => {
+        timeLeft--;
+        countdownElement.textContent = timeLeft;
+        
+        if (timeLeft <= 3) {
+          timerElement.classList.remove('active');
+          timerElement.classList.add('urgent');
+          showNotification('Hurry up! Time is running out!', 1000);
+        }
+
+        if (timeLeft <= 0) {
+          clearInterval(countdownInterval);
+          timerElement.classList.remove('active', 'urgent');
+          if (isMyTurn) {
+            makeRandomMove();
+          }
+        }
+      }, 1000);
+    }
+
+    async function makeRandomMove() {
+      const emptyCells = Array.from(document.querySelectorAll('.cell')).filter(cell => !cell.textContent);
+      if (emptyCells.length === 0) return;
+
+      // Show random selection animation
+      let animationCount = 0;
+      const maxAnimations = 6;
+      const animationInterval = setInterval(() => {
+        // Remove previous selection
+        emptyCells.forEach(cell => cell.classList.remove('random-selecting'));
+        
+        // Select new random cell
+        const randomCell = emptyCells[Math.floor(Math.random() * emptyCells.length)];
+        randomCell.classList.add('random-selecting');
+        
+        animationCount++;
+        if (animationCount >= maxAnimations) {
+          clearInterval(animationInterval);
+          // Make the final move
+          const finalCell = emptyCells[Math.floor(Math.random() * emptyCells.length)];
+          const index = parseInt(finalCell.dataset.index);
+          finalCell.classList.add('random-preview');
+          socket.emit('makeMove', { gameId, index });
+        }
+      }, 200);
+    }
+
+    // Create the grid
+    for (let i = 0; i < 9; i++) {
+      const cell = document.createElement('div');
+      cell.classList.add('cell');
+      cell.dataset.index = i;
+      cell.dataset.symbol = '';
+      cell.addEventListener('click', handleCellClick);
+      cell.addEventListener('mouseover', () => {
+        if (!cell.textContent && isMyTurn) {
+          cell.dataset.symbol = playerSymbol;
+        }
+      });
+      cell.addEventListener('mouseout', () => {
+        cell.dataset.symbol = '';
+      });
+      gridElement.appendChild(cell);
+    }
+
+    // Add this function for handling page transitions
+    function transitionPage(hideElement, showElement) {
+      // Reset game stats visibility when transitioning
+      gameStatsElement.classList.remove('visible');
+      
+      // Add fade-out class to the element we want to hide
+      if (hideElement) {
+        hideElement.classList.add('fade-out');
+      }
+      
+      // Wait for fade-out animation to complete
+      setTimeout(() => {
+        if (hideElement) {
+          hideElement.style.display = 'none';
+          hideElement.classList.remove('fade-out');
+        }
+        
+        // Show and fade-in the new element
+        if (showElement) {
+          showElement.style.display = 'block';
+          // Force a reflow
+          void showElement.offsetHeight;
+          showElement.classList.add('fade-in');
+        }
+      }, 300);
+    }
+
+    // Update mode selection handlers
+    onlineButton.addEventListener('click', () => {
+      // Reset game stats when starting new online game
+      gameStats = {
+        wins: 0,
+        games: 0
+      };
+      document.getElementById('winCount').textContent = '0';
+      document.getElementById('gameCount').textContent = '0';
+      document.getElementById('winRate').textContent = '0%';
+      gameStatsElement.classList.remove('visible');
+      
+      transitionPage(modeSelection, inputContainer);
+      isOfflineMode = false;
+    });
+
+    offlineButton.addEventListener('click', () => {
+      resetOfflineStats();
+      transitionPage(modeSelection, offlineContainer);
+      isOfflineMode = true;
+    });
+
+    // Update start button handler
+    startButton.addEventListener('click', () => {
+      const playerName = playerNameInput.value.trim();
+      if (!playerName) {
+        showNotification('Please enter your name!');
+        return;
+      }
+
+      socket.emit('joinGame', playerName);
+      transitionPage(inputContainer, null);
+      gameStatsElement.classList.add('visible');
+    });
+
+    // Update offline start button handler
+    offlineStartButton.addEventListener('click', () => {
+      player1Name = player1NameInput.value.trim() || 'Player 1';
+      player2Name = player2NameInput.value.trim() || 'Player 2';
+      
+      transitionPage(offlineInputContainer, offlineGame);
+      startOfflineGame();
+    });
+
+    // Update offline reset button handler
+    offlineResetButton.addEventListener('click', () => {
+      // Clear the grid
+      const cells = document.querySelectorAll('#offlineGrid .cell');
+      cells.forEach(cell => {
+        cell.textContent = '';
+        cell.classList.remove('taken', 'winning-cell', 'timeout-move');
+        cell.dataset.symbol = '';
+      });
+
+      // Hide the reset button and status
+      offlineResetButton.style.display = 'none';
+      offlineStatus.textContent = `${player1Name}'s turn (X)`;
+
+      // Reset player badges
+      offlinePlayer1Badge.classList.add('current');
+      offlinePlayer2Badge.classList.remove('current');
+
+      // Start new game
+      offlineCurrentPlayer = 'X';
+      offlineBoard = Array(9).fill('');
+      offlineGameActive = true;
+      startOfflineTimer();
+    });
+
+    // Update reset button handler
+    resetButton.addEventListener('click', () => {
+      // Clear the grid
+      const cells = document.querySelectorAll('#grid .cell');
+      cells.forEach(cell => {
+        cell.textContent = '';
+        cell.classList.remove('taken', 'winning-cell', 'timeout-move');
+        cell.dataset.symbol = '';
+      });
+
+      // Hide the reset button and game stats
+      resetButton.style.display = 'none';
+      gameStatsElement.classList.remove('visible');
+      
+      // Show waiting modal
+      document.getElementById('waitingModal').classList.add('show');
+
+      // Start matching again
+      socket.emit('joinGame', playerNameInput.value.trim());
+    });
+
+    function handleCellClick(e) {
+      if (!isMyTurn) return;
+      
+      const index = parseInt(e.target.dataset.index);
+      if (e.target.textContent !== '') return;
+
+      const rect = e.target.getBoundingClientRect();
+      showMoveIndicator(rect.left + rect.width / 2, rect.top + rect.height / 2);
+
+      socket.emit('makeMove', { gameId, index });
+    }
+
+    function highlightWinningCells(symbol) {
+      const board = Array.from(document.querySelectorAll('.cell')).map(cell => cell.textContent);
+      const lines = [
+        [0, 1, 2], [3, 4, 5], [6, 7, 8],
+        [0, 3, 6], [1, 4, 7], [2, 5, 8],
+        [0, 4, 8], [2, 4, 6]
+      ];
+
+      for (const [a, b, c] of lines) {
+        if (board[a] === symbol && board[b] === symbol && board[c] === symbol) {
+          document.querySelector(`[data-index="${a}"]`).classList.add('winning-cell');
+          document.querySelector(`[data-index="${b}"]`).classList.add('winning-cell');
+          document.querySelector(`[data-index="${c}"]`).classList.add('winning-cell');
+          break;
+        }
+      }
+    }
+
+    // Socket event handlers
+    socket.on('waiting', () => {
+      document.getElementById('waitingModal').classList.add('show');
+      showNotification('Looking for an opponent...');
+    });
+
+    socket.on('gameStart', ({ gameId: gId, symbol, opponentName }) => {
+      document.getElementById('waitingModal').classList.remove('show');
+      gameId = gId;
+      playerSymbol = symbol;
+      isMyTurn = symbol === 'X';
+      
+      gridElement.style.display = 'grid';
+      statusElement.classList.remove('waiting');
+      statusElement.innerHTML = isMyTurn ? 'Your turn' : `${opponentName}'s turn`;
+
+      // Update player info
+      playerInfo.style.display = 'flex';
+      playerBadge.querySelector('.player-symbol').textContent = symbol;
+      opponentBadge.querySelector('.player-symbol').textContent = symbol === 'X' ? 'O' : 'X';
+      
+      if (isMyTurn) {
+        playerBadge.classList.add('current');
+        startTimer();
+      } else {
+        opponentBadge.classList.add('current');
+      }
+
+      showNotification(`Game started! You are ${symbol}`);
+    });
+
+    socket.on('moveMade', ({ index, symbol, nextTurn, isTimeout }) => {
+      const cell = document.querySelector(`[data-index="${index}"]`);
+      
+      // Remove any animation classes
+      cell.classList.remove('random-selecting', 'random-preview');
+      
+      cell.textContent = symbol;
+      cell.classList.add('taken');
+      
+      if (isTimeout) {
+        cell.classList.add('timeout-move');
+        timeoutSound.play();
+        showNotification(symbol === playerSymbol ? 'You took too long! Random move made.' : 'Opponent took too long! Random move made.');
+      } else {
+        moveSound.play();
+      }
+
+      isMyTurn = nextTurn === playerSymbol;
+      statusElement.classList.remove('waiting');
+      statusElement.innerHTML = isMyTurn ? 'Your turn' : 'Opponent\'s turn';
+
+      // Update player badges
+      playerBadge.classList.toggle('current', isMyTurn);
+      opponentBadge.classList.toggle('current', !isMyTurn);
+
+      // Reset timer state
+      if (countdownInterval) {
+        clearInterval(countdownInterval);
+        timerElement.classList.remove('active', 'urgent');
+      }
+
+      if (isMyTurn) {
+        timerElement.classList.remove('opponent-turn');
+        startTimer();
+      } else {
+        timerElement.classList.add('opponent-turn');
+      }
+    });
+
+    socket.on('gameOver', ({ winner }) => {
+      if (countdownInterval) {
+        clearInterval(countdownInterval);
+        timerElement.classList.add('hidden');
+        timerElement.classList.remove('active', 'urgent', 'opponent-turn');
+      }
+
+      statusElement.classList.remove('waiting');
+      if (winner) {
+        if (winner === playerSymbol) {
+          statusElement.innerHTML = 'You won!';
+          winSound.play();
+          createConfetti();
+          updateStats(true);
+        } else {
+          statusElement.innerHTML = 'You lost!';
+          drawSound.play();
+          updateStats(false);
+        }
+        highlightWinningCells(winner);
+      } else {
+        statusElement.innerHTML = 'It\'s a draw!';
+        drawSound.play();
+        updateStats(false);
+      }
+      
+      isMyTurn = false;
+      resetButton.style.display = 'inline-block';
+    });
+
+    socket.on('opponentLeft', () => {
+      if (countdownInterval) {
+        clearInterval(countdownInterval);
+        timerElement.classList.add('hidden');
+        timerElement.classList.remove('active', 'urgent', 'opponent-turn');
+      }
+
+      statusElement.classList.remove('waiting');
+      statusElement.innerHTML = 'Opponent left the game';
+      
+      // Show disconnect modal with sound effect
+      document.getElementById('disconnectModal').classList.add('show');
+      disconnectSound.play();
+      
+      isMyTurn = false;
+      resetButton.style.display = 'inline-block';
+    });
+
+    // Offline game functions
+    function startOfflineGame() {
+      offlineBoard = Array(9).fill('');
+      offlineCurrentPlayer = 'X';
+      offlineGameActive = true;
+      
+      // Update player badges with names
+      offlinePlayer1Badge.innerHTML = `${player1Name} <span class="player-symbol">(X)</span>`;
+      offlinePlayer2Badge.innerHTML = `${player2Name} <span class="player-symbol">(O)</span>`;
+      
+      // Create offline grid
+      offlineGrid.innerHTML = '';
+      for (let i = 0; i < 9; i++) {
+        const cell = document.createElement('div');
+        cell.classList.add('cell');
+        cell.dataset.index = i;
+        cell.addEventListener('click', handleOfflineCellClick);
+        cell.addEventListener('mouseover', () => {
+          if (!cell.textContent && offlineGameActive) {
+            cell.dataset.symbol = offlineCurrentPlayer;
+          }
+        });
+        cell.addEventListener('mouseout', () => {
+          cell.dataset.symbol = '';
+        });
+        offlineGrid.appendChild(cell);
+      }
+      
+      offlineGrid.style.display = 'grid';
+      offlineStatus.style.display = 'block';
+      offlineStatus.textContent = `${player1Name}'s turn (X)`;
+      offlineResetButton.style.display = 'none';
+      
+      startOfflineTimer();
+      updateOfflinePlayerBadges();
+    }
+
+    function handleOfflineCellClick(e) {
+      if (!offlineGameActive) return;
+      
+      const index = parseInt(e.target.dataset.index);
+      if (offlineBoard[index] !== '') return;
+      
+      const rect = e.target.getBoundingClientRect();
+      showMoveIndicator(rect.left + rect.width / 2, rect.top + rect.height / 2);
+      
+      offlineBoard[index] = offlineCurrentPlayer;
+      e.target.textContent = offlineCurrentPlayer;
+      e.target.classList.add('taken');
+      moveSound.play();
+      
+      if (checkWinner(offlineBoard, offlineCurrentPlayer)) {
+        endOfflineGame(offlineCurrentPlayer);
+      } else if (offlineBoard.every(cell => cell !== '')) {
+        endOfflineGame(null);
+      } else {
+        offlineCurrentPlayer = offlineCurrentPlayer === 'X' ? 'O' : 'X';
+        const currentPlayerName = offlineCurrentPlayer === 'X' ? player1Name : player2Name;
+        offlineStatus.textContent = `${currentPlayerName}'s turn (${offlineCurrentPlayer})`;
+        startOfflineTimer();
+        updateOfflinePlayerBadges();
+      }
+    }
+
+    function startOfflineTimer() {
+      let timeLeft = 10;
+      offlineTimer.style.display = 'block';
+      offlineTimer.classList.remove('hidden', 'urgent');
+      offlineCountdownElement.textContent = timeLeft;
+
+      if (offlineCountdownInterval) {
+        clearInterval(offlineCountdownInterval);
+      }
+
+      void offlineTimer.offsetWidth;
+      offlineTimer.classList.add('active');
+
+      offlineCountdownInterval = setInterval(() => {
+        timeLeft--;
+        offlineCountdownElement.textContent = timeLeft;
+        
+        if (timeLeft <= 3) {
+          offlineTimer.classList.remove('active');
+          offlineTimer.classList.add('urgent');
+          showNotification('Hurry up! Time is running out!', 1000);
+        }
+
+        if (timeLeft <= 0) {
+          clearInterval(offlineCountdownInterval);
+          offlineTimer.classList.remove('active', 'urgent');
+          makeOfflineRandomMove();
+        }
+      }, 1000);
+    }
+
+    function makeOfflineRandomMove() {
+      const emptyCells = offlineBoard.reduce((acc, cell, index) => {
+        if (cell === '') acc.push(index);
+        return acc;
+      }, []);
+
+      if (emptyCells.length === 0) return;
+
+      let animationCount = 0;
+      const maxAnimations = 6;
+      const cells = document.querySelectorAll('#offlineGrid .cell');
+      
+      const animationInterval = setInterval(() => {
+        emptyCells.forEach(index => cells[index].classList.remove('random-selecting'));
+        const randomIndex = emptyCells[Math.floor(Math.random() * emptyCells.length)];
+        cells[randomIndex].classList.add('random-selecting');
+        
+        animationCount++;
+        if (animationCount >= maxAnimations) {
+          clearInterval(animationInterval);
+          const finalIndex = emptyCells[Math.floor(Math.random() * emptyCells.length)];
+          const finalCell = cells[finalIndex];
+          
+          offlineBoard[finalIndex] = offlineCurrentPlayer;
+          finalCell.textContent = offlineCurrentPlayer;
+          finalCell.classList.add('taken', 'timeout-move');
+          
+          if (checkWinner(offlineBoard, offlineCurrentPlayer)) {
+            endOfflineGame(offlineCurrentPlayer);
+          } else if (offlineBoard.every(cell => cell !== '')) {
+            endOfflineGame(null);
+          } else {
+            offlineCurrentPlayer = offlineCurrentPlayer === 'X' ? 'O' : 'X';
+            const currentPlayerName = offlineCurrentPlayer === 'X' ? player1Name : player2Name;
+            offlineStatus.textContent = `${currentPlayerName}'s turn (${offlineCurrentPlayer})`;
+            startOfflineTimer();
+            updateOfflinePlayerBadges();
+          }
+        }
+      }, 200);
+    }
+
+    function updateOfflinePlayerBadges() {
+      offlinePlayer1Badge.classList.toggle('current', offlineCurrentPlayer === 'X');
+      offlinePlayer2Badge.classList.toggle('current', offlineCurrentPlayer === 'O');
+    }
+
+    function endOfflineGame(winner) {
+      offlineGameActive = false;
+      if (offlineCountdownInterval) {
+        clearInterval(offlineCountdownInterval);
+        offlineTimer.classList.add('hidden');
+      }
+      
+      if (winner) {
+        const winnerName = winner === 'X' ? player1Name : player2Name;
+        offlineStatus.textContent = `${winnerName} wins!`;
+        winSound.play();
+        createConfetti();
+        highlightWinningCells(winner);
+        
+        // Update offline stats
+        offlineStats.games++;
+        if (winner === 'X') {
+          offlineStats.xWins++;
+        } else {
+          offlineStats.oWins++;
+        }
+        updateOfflineStats();
+      } else {
+        offlineStatus.textContent = "It's a draw!";
+        drawSound.play();
+        offlineStats.games++;
+        updateOfflineStats();
+      }
+      
+      offlineResetButton.style.display = 'inline-block';
+    }
+
+    function checkWinner(board, player) {
+      const lines = [
+        [0, 1, 2], [3, 4, 5], [6, 7, 8],
+        [0, 3, 6], [1, 4, 7], [2, 5, 8],
+        [0, 4, 8], [2, 4, 6]
+      ];
+      return lines.some(([a, b, c]) => 
+        board[a] === player && board[b] === player && board[c] === player
+      );
+    }
+
+    // Update the guide button click handler
+    guideButton.addEventListener('click', () => {
+      // Permanently hide the button and save state
+      guideButton.classList.add('fade-out');
+      localStorage.setItem('guideButtonHidden', 'true');
+      
+      // Add animation class to container
+      document.querySelector('.game-container').classList.add('button-hidden');
+      
+      const modal = document.createElement('div');
+      modal.className = 'modal-overlay';
+      modal.innerHTML = `
+        <div class="modal">
+          <button class="close-button" onclick="handleGuideClose(this)">&times;</button>
+          <h2 class="modal-title">How to Play Tic-Tac-Toe</h2>
+          <div class="guide-section">
+            <h3>Game Rules</h3>
+            <ul>
+              <li>Players take turns placing their symbol (X or O) in empty cells</li>
+              <li>First player to get 3 of their symbols in a row (horizontal, vertical, or diagonal) wins</li>
+              <li>If all cells are filled and no one has won, the game is a draw</li>
+            </ul>
+          </div>
+          <div class="guide-section">
+            <h3>Online Mode</h3>
+            <ul>
+              <li>Enter your name and click "Find Opponent" to play against other players</li>
+              <li>You have 10 seconds to make your move</li>
+              <li>If time runs out, a random move will be made for you</li>
+            </ul>
+          </div>
+          <div class="guide-section">
+            <h3>Offline Mode</h3>
+            <ul>
+              <li>Play locally with a friend on the same device</li>
+              <li>Enter names for both players (optional)</li>
+              <li>Take turns playing on the same screen</li>
+            </ul>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(modal);
+      setTimeout(() => modal.classList.add('show'), 10);
+    });
+
+    function handleGuideClose(button) {
+      const modalOverlay = button.closest('.modal-overlay');
+      modalOverlay.classList.add('fade-out');
+      setTimeout(() => {
+        modalOverlay.style.display = 'none';
+        modalOverlay.remove();
+      }, 300);
+    }
+
+    // Add disconnect modal handlers
+    function handleDisconnectPlayAgain() {
+      // Hide disconnect modal
+      document.getElementById('disconnectModal').classList.remove('show');
+      
+      // Clear the grid
+      const cells = document.querySelectorAll('#grid .cell');
+      cells.forEach(cell => {
+        cell.textContent = '';
+        cell.classList.remove('taken', 'winning-cell', 'timeout-move');
+        cell.dataset.symbol = '';
+      });
+
+      // Reset game state
+      playerSymbol = '';
+      gameId = null;
+      isMyTurn = false;
+      
+      // Show waiting modal
+      document.getElementById('waitingModal').classList.add('show');
+      
+      // Start matching again with same player name
+      socket.emit('joinGame', playerNameInput.value.trim());
+    }
+
+    function handleDisconnectGoHome() {
+      document.getElementById('disconnectModal').classList.remove('show');
+      transitionPage(null, modeSelection);
+      
+      // Reset game state
+      playerSymbol = '';
+      gameId = null;
+      isMyTurn = false;
+      
+      // Clear player name
+      playerNameInput.value = '';
+      
+      // Hide game elements and reset stats
+      gridElement.style.display = 'none';
+      playerInfo.style.display = 'none';
+      statusElement.style.display = 'none';
+      timerElement.style.display = 'none';
+      resetButton.style.display = 'none'; // Hide the reset button
+      gameStatsElement.classList.remove('visible');
+      
+      // Reset game stats
+      gameStats = {
+        wins: 0,
+        games: 0
+      };
+      document.getElementById('winCount').textContent = '0';
+      document.getElementById('gameCount').textContent = '0';
+      document.getElementById('winRate').textContent = '0%';
+    }
+
+    // Add cancel matchmaking handler
+    document.getElementById('cancelMatchmaking').addEventListener('click', () => {
+      socket.emit('cancelMatchmaking');
+      document.getElementById('waitingModal').classList.remove('show');
+      transitionPage(null, modeSelection);
+    });
+
+    // Add function to update offline stats display
+    function updateOfflineStats() {
+      document.getElementById('xWinCount').textContent = offlineStats.xWins;
+      document.getElementById('oWinCount').textContent = offlineStats.oWins;
+      document.getElementById('offlineGameCount').textContent = offlineStats.games;
+      document.getElementById('offlineStats').classList.add('visible');
+    }
+
+    // Add function to reset offline stats
+    function resetOfflineStats() {
+      offlineStats = {
+        xWins: 0,
+        oWins: 0,
+        games: 0
+      };
+      updateOfflineStats();
+    }
+  </script>
+</body>
+</html>
